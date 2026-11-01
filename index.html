@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob: data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
+<title>お買い物レジ電卓</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: sticky register display on top, big action buttons, receipt-like item list; bottom sheet for entry */
+:root{
+  --bg:#eef2ee; --surface:#ffffff; --ink:#1d2621; --muted:#5d6b63; --line:#d4ddd7;
+  --lcd:#16241c; --lcd-ink:#b8f5c8; --lcd-dim:#6fa784;
+  --tag:#ffd23f; --tag-ink:#2a2200; --accent:#1f7a4d; --accent-ink:#ffffff; --danger:#c0392b;
+  --f-display:"DotGothic16","Zen Kaku Gothic New",ui-monospace,monospace;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111814; --surface:#1a231e; --ink:#e6eee9; --muted:#9db0a5; --line:#2c3a32;
+  --lcd:#07100b; --lcd-ink:#9cf0b4; --lcd-dim:#4f8565;
+  --tag:#f2c230; --tag-ink:#231c00; --accent:#3fae76; --accent-ink:#06140c; --danger:#ff7b6b; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111814; --surface:#1a231e; --ink:#e6eee9; --muted:#9db0a5; --line:#2c3a32;
+  --lcd:#07100b; --lcd-ink:#9cf0b4; --lcd-dim:#4f8565;
+  --tag:#f2c230; --tag-ink:#231c00; --accent:#3fae76; --accent-ink:#06140c; --danger:#ff7b6b; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 120px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--lcd)}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--tag);outline-offset:2px}
+
+/* register display */
+.lcd{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--lcd);color:var(--lcd-ink);
+  margin-inline:calc(-1 * max(16px,env(safe-area-inset-left,0px)));padding:14px max(16px,env(safe-area-inset-left,0px)) 12px;
+  box-shadow:0 2px 0 rgba(0,0,0,.15)}
+.lcd-in{max-width:560px;margin:0 auto;display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:end}
+.lcd-label{font-size:12px;letter-spacing:.12em;color:var(--lcd-dim)}
+.lcd-total{font-family:var(--f-display);font-size:clamp(44px,13vw,64px);line-height:1;font-variant-numeric:tabular-nums;text-align:right;grid-column:1/-1}
+.lcd-total small{font-size:.45em;margin-left:4px}
+.lcd-sub{font-family:var(--f-display);font-size:14px;color:var(--lcd-dim);font-variant-numeric:tabular-nums}
+.lcd-sub b{color:var(--lcd-ink);font-weight:400}
+.budget{text-align:right}
+.budget.over b{color:#ff8f80}
+.lcd-bar{grid-column:1/-1;height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:6px}
+.lcd-bar i{display:block;height:100%;background:var(--lcd-ink);width:0;transition:width .3s}
+.lcd-bar.over i{background:#ff8f80}
+
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.big{border:0;border-radius:14px;padding:16px 10px;min-height:84px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-weight:700;font-size:17px}
+.big svg{width:30px;height:30px}
+.big.scan{background:var(--tag);color:var(--tag-ink)}
+.big.add{background:var(--accent);color:var(--accent-ink)}
+.big span{font-size:12px;font-weight:500;opacity:.85}
+
+.settings{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:14px;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:none;padding:6px 12px;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.budget-in{display:inline-flex;align-items:center;gap:4px}
+.budget-in input{width:96px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);text-align:right;font-variant-numeric:tabular-nums}
+
+.scanmsg{background:var(--surface);border:2px solid var(--tag);border-radius:12px;padding:12px 14px;font-size:14px;display:flex;flex-direction:column;gap:6px}
+.scanmsg ul{margin:0;padding-left:1.2em;line-height:1.7}
+.scanmsg .row{display:flex;gap:8px;flex-wrap:wrap}
+.scanmsg .row button{border:1px solid var(--ink);background:none;border-radius:8px;padding:8px 12px;font-size:14px}
+.scanmsg .row button:first-child{background:var(--tag);color:var(--tag-ink);border-color:var(--tag)}
+.notice{background:var(--surface);border:1px dashed var(--muted);border-radius:12px;padding:10px 12px;font-size:14px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.notice button{border:1px solid var(--ink);background:none;border-radius:8px;padding:6px 10px;font-size:14px}
+
+/* receipt list */
+.receipt{background:var(--surface);border-radius:4px;padding:6px 14px 10px;
+  -webkit-mask:radial-gradient(circle 6px at 50% 100%,transparent 98%,#000) 0 0/16px 100% repeat-x;mask:radial-gradient(circle 6px at 50% 0,transparent 98%,#000) 0 -6px/16px calc(100% + 6px) repeat-x}
+.receipt h2{font-size:13px;letter-spacing:.14em;color:var(--muted);font-weight:500;margin:10px 0 4px;display:flex;justify-content:space-between}
+.item{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 0;border-bottom:1px dashed var(--line)}
+.item:last-child{border-bottom:0}
+.item .name{font-weight:700;min-width:0;overflow-wrap:anywhere;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.item .name button{border:0;background:none;padding:0;text-align:left;font-weight:700}
+.chip{font-size:11px;font-weight:500;border:1px solid var(--line);border-radius:999px;padding:0 6px;color:var(--muted)}
+.chip.sample{border-color:var(--tag);background:var(--tag);color:var(--tag-ink)}
+.item .sum{font-family:var(--f-display);font-size:20px;font-variant-numeric:tabular-nums;text-align:right}
+.item .meta{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.qty{display:flex;align-items:center;gap:4px;justify-content:flex-end}
+.qty button{width:36px;height:32px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:18px;line-height:1}
+.qty output{min-width:28px;text-align:center;font-variant-numeric:tabular-nums}
+.empty{color:var(--muted);text-align:center;padding:22px 6px;font-size:15px}
+
+.footer-actions{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.ghost{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 14px;font-size:14px}
+.ghost.danger{color:var(--danger);border-color:var(--danger)}
+.help{font-size:13px;color:var(--muted);line-height:1.7}
+.help h3{font-size:14px;color:var(--ink);margin:0 0 4px}
+.help p{margin:0 0 8px}
+
+/* sheet */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:21;background:var(--surface);border-radius:18px 18px 0 0;
+  padding:16px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));max-height:92%;overflow:auto}
+.sheet-in{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.sheet h2{margin:0;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+.sheet h2 button{border:0;background:none;font-size:15px;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.field input,.field select{font-size:18px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);width:100%}
+.voice{background:var(--bg);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.voice .row{display:flex;gap:8px}
+.voice input{flex:1;min-width:0;font-size:18px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink)}
+.voice .row button{border:0;border-radius:10px;padding:0 14px;background:var(--ink);color:var(--bg);font-weight:700}
+.voice small{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.voice small svg{width:14px;height:14px;flex:none}
+.grid2{display:grid;grid-template-columns:2fr 1fr;gap:10px}
+.code{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.primary{border:0;border-radius:12px;padding:16px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:18px}
+.preview{font-family:var(--f-display);font-size:22px;text-align:right;font-variant-numeric:tabular-nums}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:30;
+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:14px;max-width:calc(100% - 32px);text-align:center}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:14px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="lcd" aria-live="polite">
+    <div class="lcd-in">
+      <div class="lcd-label">合計（税込）</div>
+      <div class="lcd-sub" id="countLine"><b>0</b> 点</div>
+      <div class="lcd-total" id="total">0<small>円</small></div>
+      <div class="lcd-sub" id="taxLine">うち消費税 0円</div>
+      <div class="lcd-sub budget" id="budgetLine"></div>
+      <div class="lcd-bar" id="bar" hidden><i></i></div>
+    </div>
+  </header>
+
+  <div class="actions">
+    <button class="big scan" id="scanBtn" type="button">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M3 9V4h5M24 4h5v5M29 23v5h-5M8 28H3v-5"/><path d="M9 10v12M13 10v12M16 10v12M20 10v12M23 10v12" stroke-width="2"/></svg>
+      バーコード撮影<span>カメラが開きます</span>
+    </button>
+    <button class="big add" id="addBtn" type="button">
+      <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><rect x="11" y="3" width="10" height="17" rx="5"/><path d="M6 15a10 10 0 0 0 20 0M16 25v4"/></svg>
+      金額を入力<span>声でも入力できます</span>
+    </button>
+  </div>
+  <div class="scanmsg" id="scanMsg" role="alert" hidden>
+    <b>バーコードを読み取れませんでした</b>
+    <ul>
+      <li>スマホを<b>15〜20cm離して</b>ピントを合わせる（近すぎるとぼやけます）</li>
+      <li>バーコードが画面の<b>横幅の半分以上</b>になるよう、カメラのズームで調整</li>
+      <li>バーコードの線と画面の横向きをそろえ、光の反射を避ける</li>
+    </ul>
+    <div class="row"><button type="button" id="retake">撮り直す</button><button type="button" id="typeJan">下の数字を入力</button></div>
+  </div>
+  <input type="file" id="cam" accept="image/*" capture="environment" hidden>
+
+  <div class="settings">
+    <span>値札の金額</span>
+    <div class="seg" role="group" aria-label="値札の金額">
+      <button type="button" id="modeIn" aria-pressed="true">税込</button>
+      <button type="button" id="modeEx" aria-pressed="false">税抜</button>
+    </div>
+    <label class="budget-in" for="budget">予算 <input id="budget" inputmode="numeric" placeholder="なし"> 円</label>
+  </div>
+
+  <div class="notice" id="sampleNote" hidden>
+    <span>下の3品は<b>見本</b>です。</span>
+    <button type="button" id="clearSample">見本を消して始める</button>
+  </div>
+
+  <section class="receipt" aria-label="買い物リスト">
+    <h2><span>お買い物リスト</span><span id="dateLbl"></span></h2>
+    <div id="list"></div>
+  </section>
+
+  <div class="footer-actions">
+    <div id="clearArea"><button class="ghost danger" type="button" id="clearBtn">すべて消す</button></div>
+  </div>
+
+  <section class="help">
+    <h3>使い方のコツ</h3>
+    <p>撮影のコツ：スマホを15〜20cm離し、ズームでバーコードを大きく写します。読めないときはバーコード下の数字を入力しても同じように値段を覚えます。</p>
+    <p>バーコードには値段が入っていません。初めての商品は撮影後に値段を入れてください。同じ端末なら次からは撮るだけで前回の値段で追加されます。</p>
+    <p>声で入れるときは、入力欄をタップしてキーボードのマイクを押し、「牛乳 198円 2個」のように話します。</p>
+    <p>税抜モードでは食品8%で計算します。日用品・酒類は入力時に10%を選んでください。合計は目安で、レジの端数処理と数円ずれることがあります。</p>
+  </section>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+  <form class="sheet-in" id="form" autocomplete="off">
+    <h2><span id="sheetTitle">商品を追加</span><button type="button" id="closeSheet">閉じる</button></h2>
+    <div class="voice">
+      <div class="row">
+        <input id="quick" placeholder="例：牛乳 198円 2個" enterkeyhint="done" aria-label="まとめて入力">
+        <button type="button" id="quickApply">反映</button>
+      </div>
+      <small><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"/><path d="M3 8a5 5 0 0 0 10 0M8 13v2"/></svg>キーボードのマイクで話すと、下の欄に自動で振り分けます</small>
+    </div>
+    <label class="field" for="fName">商品名（なくても可）<input id="fName" placeholder="商品"></label>
+    <div class="grid2">
+      <label class="field" for="fPrice">単価（円）<input id="fPrice" inputmode="numeric" required></label>
+      <label class="field" for="fQty">個数<input id="fQty" inputmode="numeric" value="1"></label>
+    </div>
+    <label class="field" for="fRate" id="rateWrap" hidden>税率
+      <select id="fRate"><option value="8">8%（食品・飲料）</option><option value="10">10%（日用品・酒類）</option></select>
+    </label>
+    <label class="field" for="fJan">JANコード（バーコード下の8桁か13桁・任意）<input id="fJan" inputmode="numeric" maxlength="13" placeholder="例：4901234567894"></label>
+    <div class="code" id="fCode"></div>
+    <div class="preview" id="fPreview">0円</div>
+    <button class="primary" type="submit" id="submitBtn">リストに追加</button>
+  </form>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/* EAN-13 / EAN-8 / UPC-A decoder from a grayscale image. No dependencies. */
+var JanDecoder=(function(){
+const LW=[[3,2,1,1],[2,2,2,1],[2,1,2,2],[1,4,1,1],[1,1,3,2],[1,2,3,1],[1,1,1,4],[1,3,1,2],[1,2,1,3],[3,1,1,2]];
+const GW=LW.map(p=>p.slice().reverse());
+const PAR=['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'];
+function dist(r,p){
+  const s=r[0]+r[1]+r[2]+r[3];const n=r.map(x=>x*7/s);
+  let d=0;for(let k=0;k<4;k++)d+=Math.abs(n[k]-p[k])*0.5;
+  for(let k=0;k<3;k++)d+=Math.abs(n[k]+n[k+1]-p[k]-p[k+1]);
+  return d;
+}
+function best(r,set){let bi=-1,bd=1e9,sd=1e9;for(let i=0;i<10;i++){const d=dist(r,set[i]);if(d<bd){sd=bd;bd=d;bi=i}else if(d<sd)sd=d}return {i:bi,d:bd,gap:sd-bd}}
+function guardOk(runs,i,n,m){for(let k=0;k<n;k++){const v=runs[i+k]/m;if(v<0.35||v>2.2)return false}return true}
+function check13(d){let s=0;for(let i=0;i<12;i++)s+=d[i]*(i%2?3:1);return (10-s%10)%10===d[12]}
+function check8(d){let s=0;for(let i=0;i<7;i++)s+=d[i]*(i%2?1:3);return (10-s%10)%10===d[7]}
+const MAXD=2.2;
+function try13(runs,i){
+  let sum=0;for(let k=0;k<59;k++)sum+=runs[i+k];const m=sum/95;
+  if(!guardOk(runs,i,3,m)||!guardOk(runs,i+27,5,m)||!guardOk(runs,i+56,3,m))return null;
+  const digits=[],par=[];let score=0;
+  for(let j=0;j<6;j++){const r=runs.slice(i+3+j*4,i+7+j*4);const a=best(r,LW),b=best(r,GW);
+    const x=a.d<=b.d?a:b;if(x.d>MAXD)return null;score+=x.d;digits.push(x.i);par.push(a.d<=b.d?'L':'G')}
+  for(let j=0;j<6;j++){const r=runs.slice(i+32+j*4,i+36+j*4);const a=best(r,LW),g=best(r,GW);if(a.d>MAXD||g.d<a.d)return null;score+=a.d;digits.push(a.i)}
+  const f=PAR.indexOf(par.join(''));if(f<0)return null;
+  const d=[f].concat(digits);if(!check13(d))return null;
+  return {code:d.join(''),score:score/12};
+}
+function try8(runs,i){
+  let sum=0;for(let k=0;k<43;k++)sum+=runs[i+k];const m=sum/67;
+  if(!guardOk(runs,i,3,m)||!guardOk(runs,i+19,5,m)||!guardOk(runs,i+40,3,m))return null;
+  const d=[];let score=0;
+  for(const base of [i+3,i+24])for(let j=0;j<4;j++){const r=runs.slice(base+j*4,base+4+j*4);const a=best(r,LW),g=best(r,GW);
+    if(a.d>1.6||g.d<a.d)return null;score+=a.d;d.push(a.i)}
+  if(!check8(d))return null;return {code:d.join(''),score:score/8};
+}
+/* quiet zone: the run before start guard should be a light run wider than ~3 modules (or line edge) */
+function quiet(runs,i,len,mods){let s=0;for(let k=0;k<len;k++)s+=runs[i+k];const m=s/mods;
+  const before=i>0?runs[i-1]:1e9,after=i+len<runs.length?runs[i+len]:1e9;return before>=m*2.5&&after>=m*2.5}
+function decodeRuns(runs,firstDark){
+  const out=[];
+  for(let i=firstDark?0:1;i+43<=runs.length;i+=2){
+    if(i+59<=runs.length&&quiet(runs,i,59,95)){const r=try13(runs,i);if(r){out.push(r);continue}}
+    if(quiet(runs,i,43,67)){const r=try8(runs,i);if(r)out.push(r)}
+  }
+  return out;
+}
+function runsFrom(vals,thr,ok){
+  const n=vals.length;const bits=new Uint8Array(n);for(let k=0;k<n;k++)bits[k]=ok[k]&&vals[k]<thr[k]?1:0;
+  const runs=[];let lastEdge=0;
+  for(let k=1;k<n;k++){if(bits[k]!==bits[k-1]){const a=vals[k-1]-thr[k-1],b=vals[k]-thr[k];const t=(a===b)?0.5:a/(a-b);const e=k-1+Math.min(1,Math.max(0,t));runs.push(e-lastEdge);lastEdge=e}}
+  runs.push(n-lastEdge);
+  return {runs,firstDark:bits[0]===1};
+}
+function lineRuns(raw){
+  const n=raw.length;if(n<60)return [];
+  const vals=new Float32Array(n);for(let k=0;k<n;k++)vals[k]=(raw[Math.max(0,k-1)]+2*raw[k]+raw[Math.min(n-1,k+1)])/4;
+  let gmin=255,gmax=0;for(const v of vals){if(v<gmin)gmin=v;if(v>gmax)gmax=v}
+  const range=gmax-gmin;if(range<25)return [];
+  const pre=new Float64Array(n+1);for(let k=0;k<n;k++)pre[k+1]=pre[k]+vals[k];
+  const out=[];
+  for(const div of [10,25,60]){
+    const W=Math.max(4,Math.round(n/div));
+    const thr=new Float32Array(n),ok=new Uint8Array(n);
+    const step=Math.max(1,W>>2);
+    for(let c=0;c<n;c+=step){let mn=255,mx=0;const a=Math.max(0,c-W),b=Math.min(n,c+W);
+      for(let k=a;k<b;k+=1){const v=vals[k];if(v<mn)mn=v;if(v>mx)mx=v}
+      const good=(mx-mn)>range*0.18?1:0;
+      for(let k=c;k<Math.min(n,c+step);k++){ok[k]=good;thr[k]=(mn+mx)/2}}
+    out.push(runsFrom(vals,thr,ok));
+    const thr2=new Float32Array(n);
+    for(let k=0;k<n;k++){const a=Math.max(0,k-W),b=Math.min(n,k+W+1);thr2[k]=(pre[b]-pre[a])/(b-a)}
+    out.push(runsFrom(vals,thr2,ok));
+  }
+  out.push(edgeRuns(vals,range,2,0.06));out.push(edgeRuns(vals,range,1,0.035));
+  return out;
+}
+/* edge detector: edges at extrema of the first derivative (robust to blur) */
+function edgeRuns(vals,range,K,frac){
+  const n=vals.length;const d=new Float32Array(n);
+  if(K===2){for(let k=2;k<n-2;k++)d[k]=(vals[k+1]+vals[k+2]-vals[k-1]-vals[k-2])/2}else{for(let k=1;k<n-1;k++)d[k]=vals[k+1]-vals[k-1]}
+  const minE=Math.max(3,range*frac);
+  const edges=[];// {pos,sign,mag}
+  for(let k=3;k<n-3;k++){const v=d[k];if(Math.abs(v)<minE)continue;
+    if((v>0&&v>=d[k-1]&&v>d[k+1])||(v<0&&v<=d[k-1]&&v<d[k+1])){
+      const a=d[k-1],b=d[k],c=d[k+1];const den=a-2*b+c;const off=den?Math.max(-0.5,Math.min(0.5,(a-c)/(2*den))):0;
+      const e={pos:k+off,sign:v>0?1:-1,mag:Math.abs(v)};
+      const last=edges[edges.length-1];
+      if(last&&last.sign===e.sign){if(e.mag>last.mag)edges[edges.length-1]=e}else edges.push(e)}}
+  // relative magnitude filter: drop weak edges compared with neighbours (noise in flat areas)
+  const runs=[];if(edges.length<4)return {runs:[n],firstDark:false};
+  const firstDark=edges[0].sign>0; // first edge rising means we start in dark
+  let last=0;for(const e of edges){runs.push(e.pos-last);last=e.pos}
+  runs.push(n-last);
+  return {runs,firstDark};
+}
+function sample(g,w,h,x0,y0,dx,dy,px,py){
+  // walk from center both ways until out of bounds, averaging 3 parallel samples
+  const pts=[];
+  let tmin=-1e9,tmax=1e9;
+  function lim(p,d,max){if(Math.abs(d)<1e-9){if(p<0||p>max-1){tmin=1;tmax=0}return}let a=(0-p)/d,b=(max-1-p)/d;if(a>b){const t=a;a=b;b=t}tmin=Math.max(tmin,a);tmax=Math.min(tmax,b)}
+  lim(x0,dx,w);lim(y0,dy,h);
+  if(tmax<=tmin)return null;
+  const vals=[];
+  for(let t=Math.ceil(tmin);t<=tmax;t++){let s=0,c=0;
+    for(let o=-1;o<=1;o++){const x=Math.round(x0+dx*t+px*o),y=Math.round(y0+dy*t+py*o);if(x>=0&&y>=0&&x<w&&y<h){s+=g[y*w+x];c++}}
+    vals.push(c?s/c:255)}
+  return vals;
+}
+function scan(g,w,h,opts){
+  opts=opts||{};
+  const angles=opts.angles||[0,90,-15,15,-30,30,-45,45,60,-60,75,-75];
+  const votes=new Map();
+  const add=r=>{const v=votes.get(r.code)||{n:0,s:0};v.n++;v.s+=r.score;votes.set(r.code,v)};
+  const cx=w/2,cy=h/2,R=Math.hypot(w,h)/2;
+  for(const ang of angles){
+    const a=ang*Math.PI/180,dx=Math.cos(a),dy=Math.sin(a),px=-dy,py=dx;
+    const lines=opts.lines||71;
+    for(let li=0;li<lines;li++){
+      const off=(li/(lines-1)-0.5)*2*R*0.95;
+      const vals=sample(g,w,h,cx+px*off,cy+py*off,dx,dy,px,py);if(!vals)continue;
+      for(const dir of [0,1]){
+        const v=dir?vals.slice().reverse():vals;
+        for(const lr of lineRuns(v))for(const r of decodeRuns(lr.runs,lr.firstDark))add(r);
+      }
+    }
+    for(const [c,v] of votes)if(v.n>=(c.length===13?3:5))return c;
+  }
+  let bestC=null,bn=0;
+  for(const [c,v] of votes){const need=c.length===13?2:4;if(v.n>=need&&(v.n>bn||(v.n===bn&&v.s<votes.get(bestC).s))){bn=v.n;bestC=c}}
+  return bestC;
+}
+return {scan};
+})();
+</script>
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const yen=n=>Math.round(n).toLocaleString('ja-JP');
+const store={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+             set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+
+let state=store.get('kr_state',null);
+let catalog=store.get('kr_catalog',{});
+if(!state){
+  state={mode:'in',budget:null,sample:true,items:[
+    {id:1,name:'牛乳 1L',price:218,qty:1,rate:8,sample:true},
+    {id:2,name:'食パン 6枚切',price:158,qty:2,rate:8,sample:true},
+    {id:3,name:'キッチンペーパー',price:298,qty:1,rate:10,sample:true}]};
+}
+let editingId=null, pendingCode=null;
+const save=()=>store.set('kr_state',state);
+
+function calc(){
+  let total=0,tax=0,count=0;
+  if(state.mode==='in'){
+    for(const it of state.items){const s=it.price*it.qty;total+=s;count+=it.qty;tax+=Math.floor(s*it.rate/(100+it.rate))}
+  }else{
+    const by={8:0,10:0};
+    for(const it of state.items){by[it.rate]=(by[it.rate]||0)+it.price*it.qty;count+=it.qty}
+    for(const r in by){const t=Math.floor(by[r]*r/100);tax+=t;total+=by[r]+t}
+  }
+  return {total,tax,count};
+}
+function lineTotal(it){return state.mode==='in'?it.price*it.qty:Math.floor(it.price*it.qty*(100+it.rate)/100)}
+
+function render(){
+  const {total,tax,count}=calc();
+  $('total').innerHTML=yen(total)+'<small>円</small>';
+  $('countLine').innerHTML='<b>'+count+'</b> 点';
+  $('taxLine').textContent='うち消費税 '+yen(tax)+'円'+(state.mode==='ex'?'（目安）':'');
+  const bl=$('budgetLine'),bar=$('bar');
+  if(state.budget){
+    const rest=state.budget-total, over=rest<0;
+    bl.className='lcd-sub budget'+(over?' over':'');
+    bl.innerHTML=over?'予算オーバー <b>'+yen(-rest)+'</b>円':'残り <b>'+yen(rest)+'</b>円';
+    bar.hidden=false;bar.className='lcd-bar'+(over?' over':'');
+    bar.firstElementChild.style.width=Math.min(100,total/state.budget*100)+'%';
+  }else{bl.textContent='';bar.hidden=true}
+  $('modeIn').setAttribute('aria-pressed',state.mode==='in');
+  $('modeEx').setAttribute('aria-pressed',state.mode==='ex');
+  $('budget').value=state.budget?String(state.budget):'';
+  $('sampleNote').hidden=!state.items.some(i=>i.sample);
+  const list=$('list');list.textContent='';
+  if(!state.items.length){
+    const p=document.createElement('p');p.className='empty';
+    p.textContent='まだ何も入っていません。上のボタンでバーコードを撮るか、金額を入力してください。';
+    list.appendChild(p);
+  }
+  for(const it of [...state.items].reverse()){
+    const row=document.createElement('div');row.className='item';
+    const nm=document.createElement('div');nm.className='name';
+    const nb=document.createElement('button');nb.type='button';nb.textContent=it.name||'商品';nb.title='編集';
+    nb.onclick=()=>openSheet(it);nm.appendChild(nb);
+    if(state.mode==='ex'){const c=document.createElement('span');c.className='chip';c.textContent=it.rate+'%';nm.appendChild(c)}
+    if(it.sample){const c=document.createElement('span');c.className='chip sample';c.textContent='見本';nm.appendChild(c)}
+    const sum=document.createElement('div');sum.className='sum';sum.textContent=yen(lineTotal(it));
+    const meta=document.createElement('div');meta.className='meta';
+    meta.textContent='@'+yen(it.price)+'円'+(state.mode==='ex'?'（税抜）':'')+' × '+it.qty;
+    const q=document.createElement('div');q.className='qty';
+    const minus=document.createElement('button');minus.type='button';minus.textContent='−';minus.setAttribute('aria-label',(it.name||'商品')+'を1つ減らす');
+    const out=document.createElement('output');out.textContent=it.qty;
+    const plus=document.createElement('button');plus.type='button';plus.textContent='＋';plus.setAttribute('aria-label',(it.name||'商品')+'を1つ増やす');
+    minus.onclick=()=>{if(it.qty>1){it.qty--}else{state.items=state.items.filter(x=>x!==it);toast((it.name||'商品')+'を削除しました')}save();render()};
+    plus.onclick=()=>{it.qty++;save();render()};
+    q.append(minus,out,plus);
+    row.append(nm,sum,meta,q);list.appendChild(row);
+  }
+  $('dateLbl').textContent=new Date().toLocaleDateString('ja-JP',{month:'numeric',day:'numeric',weekday:'short'});
+}
+
+let toastT;
+function toast(msg){const t=$('toast');t.textContent=msg;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,2600)}
+
+/* ---- sheet ---- */
+function openSheet(item,code){
+  editingId=item?item.id:null;pendingCode=code||(item&&item.code)||null;
+  $('sheetTitle').textContent=item?'商品を編集':'商品を追加';
+  $('submitBtn').textContent=item?'変更を保存':'リストに追加';
+  $('fName').value=item?item.name:'';
+  $('fPrice').value=item?item.price:'';
+  $('fQty').value=item?item.qty:1;
+  $('fRate').value=item?item.rate:'8';
+  $('rateWrap').hidden=state.mode!=='ex';
+  $('fJan').value=pendingCode||'';
+  $('fCode').textContent=pendingCode?'この端末に値段を覚えます。次回は撮るだけで追加されます':'';
+  $('quick').value='';
+  $('scrim').hidden=false;$('sheet').hidden=false;preview();
+  setTimeout(()=>{(code&&!item?$('fPrice'):$('quick')).focus()},60);
+}
+function closeSheet(){$('scrim').hidden=true;$('sheet').hidden=true}
+function num(v){v=String(v||'').replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/[,，円\s]/g,'');const n=parseInt(v,10);return isNaN(n)?0:n}
+function preview(){
+  const p=num($('fPrice').value),q=Math.max(1,num($('fQty').value)||1),r=+$('fRate').value;
+  const v=state.mode==='in'?p*q:Math.floor(p*q*(100+r)/100);
+  $('fPreview').textContent=yen(v)+'円'+(state.mode==='ex'?'（税込）':'');
+}
+['fPrice','fQty','fRate'].forEach(id=>$(id).addEventListener('input',preview));
+$('fJan').addEventListener('input',()=>{
+  const v=num($('fJan').value)?String($('fJan').value).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/\D/g,''):'';
+  const msg=$('fCode');
+  if(!v){msg.textContent='';return}
+  if(v.length===8||v.length===13){
+    if(!checkJan(v)){msg.textContent='数字が1つ違うようです。もう一度確認してください';return}
+    const k=catalog[v];
+    if(k&&!editingId){$('fName').value=k.name;$('fPrice').value=k.price;$('fRate').value=k.rate||8;preview();msg.textContent='前回の値段を入れました'}
+    else msg.textContent='この端末に値段を覚えます。次回は撮るだけで追加されます';
+  }else msg.textContent='';
+});
+
+/* 「牛乳 198円 2個」→ name/price/qty */
+function parseSpoken(s){
+  s=s.replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/[，、。]/g,' ').replace(/(\d),(\d)/g,'$1$2');
+  let price=null,qty=null,rate=null;
+  s=s.replace(/(\d+)\s*(?:パーセント|%|％)/,(m,a)=>{if(a==='8'||a==='10')rate=a;return ' '});
+  s=s.replace(/(\d+)\s*円/,(m,a)=>{price=+a;return ' '});
+  s=s.replace(/(\d+)\s*(?:個|こ|コ|つ|本|点|パック|袋|枚|缶|束|玉|匹|尾)/,(m,a)=>{qty=+a;return ' '});
+  s=s.replace(/[x×*]\s*(\d+)/i,(m,a)=>{qty=+a;return ' '});
+  const rest=[];s=s.replace(/\d+/g,m=>{rest.push(+m);return ' '});
+  if(price==null&&rest.length)price=rest.shift();
+  if(qty==null&&rest.length)qty=rest.shift();
+  const name=s.replace(/\s+/g,' ').trim();
+  return {name,price,qty,rate};
+}
+function applyQuick(){
+  const v=$('quick').value.trim();if(!v)return;
+  const r=parseSpoken(v);
+  if(r.name)$('fName').value=r.name;
+  if(r.price!=null)$('fPrice').value=r.price;
+  if(r.qty!=null)$('fQty').value=r.qty;
+  if(r.rate)$('fRate').value=r.rate;
+  preview();
+  if(r.price==null){toast('金額が聞き取れませんでした。単価欄に入れてください');$('fPrice').focus()}
+}
+$('quickApply').onclick=applyQuick;
+$('quick').addEventListener('change',applyQuick);
+$('quick').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();applyQuick()}});
+
+$('form').addEventListener('submit',e=>{
+  e.preventDefault();
+  if($('quick').value.trim()&&!$('fPrice').value)applyQuick();
+  const price=num($('fPrice').value);
+  if(!price){toast('単価を入れてください');$('fPrice').focus();return}
+  const qty=Math.max(1,num($('fQty').value)||1);
+  const name=$('fName').value.trim();
+  const rate=+$('fRate').value;
+  if(editingId){
+    const it=state.items.find(i=>i.id===editingId);
+    Object.assign(it,{name,price,qty,rate,sample:false});
+  }else{
+    state.items.push({id:Date.now(),name,price,qty,rate});
+  }
+  const jan=String($('fJan').value).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/\D/g,'');
+  const code=(jan&&checkJan(jan))?jan:null;
+  if(editingId){const it=state.items.find(i=>i.id===editingId);if(it&&code)it.code=code}
+  else if(code){state.items[state.items.length-1].code=code}
+  if(code){catalog[code]={name,price,rate};store.set('kr_catalog',catalog)}
+  save();render();closeSheet();
+  toast(editingId?'変更しました':(name||'商品')+' '+yen(price)+'円を追加');
+});
+$('closeSheet').onclick=closeSheet;$('scrim').onclick=closeSheet;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('sheet').hidden)closeSheet()});
+
+/* ---- barcode from photo ---- */
+$('scanBtn').onclick=()=>{$('cam').value='';$('cam').click()};
+$('cam').addEventListener('change',async()=>{
+  const f=$('cam').files[0];if(!f)return;
+  $('scanMsg').hidden=true;
+  const t=$('toast');t.textContent='読み取り中…';t.hidden=false;clearTimeout(toastT);
+  let code=null;
+  try{code=await decode(f)}catch(e){}
+  t.hidden=true;
+  if(!code){$('scanMsg').hidden=false;return}
+  addByCode(code);
+});
+function addByCode(code){
+  if(code.length===12)code='0'+code;
+  const known=catalog[code];
+  if(known){
+    const ex=state.items.find(i=>i.code===code);
+    if(ex){ex.qty++}else{state.items.push({id:Date.now(),name:known.name,price:known.price,qty:1,rate:known.rate||8,code})}
+    save();render();toast((known.name||'商品')+' '+yen(known.price)+'円（前回の値段）を追加');
+  }else{
+    openSheet(null,code);toast('JAN '+code+' を読み取りました。値段を入れてください');
+  }
+}
+$('retake').onclick=()=>{$('scanMsg').hidden=true;$('cam').value='';$('cam').click()};
+$('typeJan').onclick=()=>{$('scanMsg').hidden=true;openSheet(null);setTimeout(()=>$('fJan').focus(),80)};
+function loadImg(file){return new Promise((res,rej)=>{const u=URL.createObjectURL(file);const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=u})}
+function valid(c){return /^\d{8}$|^\d{12,13}$/.test(c)&&checkJan(c.length===12?'0'+c:c)}
+function checkJan(c){if(!/^\d{8}$|^\d{13}$/.test(c))return false;const d=c.split('').map(Number),L=d.length;let s=0;
+  for(let i=0;i<L-1;i++)s+=d[i]*(L===13?(i%2?3:1):(i%2?1:3));return (10-s%10)%10===d[L-1]}
+function grayOf(img,max){
+  const s=Math.min(1,max/Math.max(img.naturalWidth||img.width,img.naturalHeight||img.height));
+  const w=Math.round((img.naturalWidth||img.width)*s),h=Math.round((img.naturalHeight||img.height)*s);
+  const cv=document.createElement('canvas');cv.width=w;cv.height=h;const ctx=cv.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(img,0,0,w,h);const d=ctx.getImageData(0,0,w,h).data;const g=new Uint8Array(w*h);
+  for(let i=0,j=0;j<g.length;i+=4,j++)g[j]=(d[i]*77+d[i+1]*150+d[i+2]*29)>>8;
+  return {g,w,h,cv};
+}
+const tick=()=>new Promise(r=>setTimeout(r,30));
+async function decode(file){
+  const img=await loadImg(file);
+  if('BarcodeDetector' in window){
+    try{const det=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e']});
+      const r=await det.detect(img);if(r&&r[0]&&valid(r[0].rawValue))return r[0].rawValue}catch(e){}
+  }
+  let lastCv=null;
+  for(const mx of [1600,1000,2600]){
+    await tick();
+    const {g,w,h,cv}=grayOf(img,mx);lastCv=cv;
+    const c=JanDecoder.scan(g,w,h);if(c&&valid(c))return c;
+  }
+  if(window.ZXing&&lastCv){
+    try{const hints=new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.UPC_A]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER,true);
+      const reader=new ZXing.MultiFormatReader();reader.setHints(hints);
+      const bmp=new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(lastCv)));
+      const t=reader.decode(bmp,hints).getText();if(valid(t))return t}catch(e){}
+  }
+  return null;
+}
+
+/* ---- settings ---- */
+$('modeIn').onclick=()=>{state.mode='in';save();render()};
+$('modeEx').onclick=()=>{state.mode='ex';save();render()};
+$('budget').addEventListener('change',()=>{const n=num($('budget').value);state.budget=n||null;save();render()});
+$('addBtn').onclick=()=>openSheet(null);
+$('clearSample').onclick=()=>{state.items=state.items.filter(i=>!i.sample);save();render()};
+function clearUI(){
+  const a=$('clearArea');a.textContent='';
+  const b=document.createElement('button');b.className='ghost danger';b.type='button';b.textContent='すべて消す';
+  b.onclick=()=>{
+    if(!state.items.length)return;
+    a.textContent='';const w=document.createElement('div');w.className='confirm';
+    const t=document.createElement('span');t.textContent='リストを空にしますか？';
+    const y=document.createElement('button');y.className='ghost danger';y.type='button';y.textContent='空にする';
+    const n=document.createElement('button');n.className='ghost';n.type='button';n.textContent='やめる';
+    y.onclick=()=>{state.items=[];save();render();clearUI();toast('リストを空にしました（覚えた値段は残ります）')};
+    n.onclick=clearUI;w.append(t,y,n);a.appendChild(w);
+  };
+  a.appendChild(b);
+}
+clearUI();render();
+})();
+</script>
+
+</body>
+</html>
